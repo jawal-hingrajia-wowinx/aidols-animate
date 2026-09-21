@@ -1,0 +1,28 @@
+__pycache__/
+*.pyc
+.env
+venv/
+.venv/
+
+# local sample video source files (migrated to Blob storage; kept locally
+# only as source material for scripts/migrate_samples_to_blob.py)
+samples/videos/*
+!samples/videos/.gitkeep
+
+# stale local artifacts from before the Postgres/Blob migration
+data/
+uploads/
+results/
+
+.DS_Store
+.vercel
+.env*
+!.env.example
+
+# stale, no longer used since samples moved to Blob URLs
+samples/fal_url_cache.json
+
+# local agent/assistant tooling artifacts, not app code
+.agents/
+.claude/
+skills-lock.json

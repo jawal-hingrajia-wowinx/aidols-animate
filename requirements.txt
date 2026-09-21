@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+python-multipart
+fal-client
+python-dotenv
+jinja2
+httpx
+asyncpg
+vercel

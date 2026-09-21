@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AIdols — Animate</title>
+  <link rel="stylesheet" href="/static/css/style.css?v={{ asset_version }}" />
+</head>
+<body>
+  <div class="page">
+    <header class="brand">
+      <h1>AIdols</h1>
+      <span class="tag">Animate</span>
+    </header>
+    <p class="subtitle">Turn a photo into a moving character using a reference motion clip.</p>
+
+    <div class="tabs">
+      <button class="tab-btn active" id="tab-btn-generate" type="button">Generate</button>
+      <button class="tab-btn" id="tab-btn-history" type="button">History</button>
+    </div>
+
+    <div id="generate-view">
+      <section class="step">
+        <div class="step-label">
+          <span class="step-number">1</span>
+          <span class="step-title">Upload your photo</span>
+        </div>
+        <div class="dropzone" id="image-dropzone">
+          <div>Click or drag an image here</div>
+          <div class="hint">JPG, PNG or WEBP — clear full body or upper body shot works best</div>
+        </div>
+        <div class="image-preview" id="image-preview">
+          <img id="image-preview-img" alt="Preview" />
+          <div class="info" id="image-preview-info">Uploaded</div>
+          <button id="image-preview-remove" type="button">Remove</button>
+        </div>
+        <input type="file" id="image-input" accept="image/jpeg,image/png,image/webp" />
+      </section>
+
+      <section class="step">
+        <div class="step-label">
+          <span class="step-number">2</span>
+          <span class="step-title">Choose a motion</span>
+        </div>
+        <div class="samples-grid" id="samples-grid">
+          <div class="sample-card upload-own" id="upload-own-card">
+            + Upload your own reference video
+          </div>
+        </div>
+        <input type="file" id="video-input" accept="video/mp4,video/quicktime,video/webm" />
+      </section>
+
+      <section class="step">
+        <div class="step-label">
+          <span class="step-number">3</span>
+          <span class="step-title">Options</span>
+        </div>
+        <div class="options-row">
+          <label id="orientation-video-label">
+            <input type="radio" name="orientation" value="video" checked />
+            Video-led (complex motion, up to 30s)
+          </label>
+          <label id="orientation-image-label">
+            <input type="radio" name="orientation" value="image" />
+            Image-led (camera movement, up to 10s)
+          </label>
+          <label id="sound-label" class="active">
+            <input type="checkbox" id="keep-sound" checked />
+            Keep reference audio
+          </label>
+        </div>
+        <div class="prompt-row">
+          <label for="prompt-input">Additional instructions (optional)</label>
+          <textarea id="prompt-input" rows="2" placeholder="e.g. dribbling a soccer ball, ball visible at their feet throughout"></textarea>
+          <div class="hint">Models sometimes drop objects (like a ball) that aren't part of the body's motion — a short description can help.</div>
+        </div>
+      </section>
+
+      <section class="step">
+        <div class="step-label">
+          <span class="step-number">4</span>
+          <span class="step-title">Compare models</span>
+        </div>
+        <div class="models-list" id="models-list"></div>
+        <div class="hint models-cost-hint">Each checked model runs as its own paid generation — uncheck any you don't want to spend on.</div>
+      </section>
+
+      <button class="generate-btn" id="generate-btn" disabled>Generate Video</button>
+
+      <div class="results-grid" id="results-grid"></div>
+    </div>
+
+    <div id="history-view" style="display: none">
+      <div class="history-toolbar">
+        <span class="hint">Every past generation, re-hosted on Blob storage so it survives fal.ai's ~7-day link expiry.</span>
+        <button class="refresh-btn" id="history-refresh-btn" type="button">Refresh</button>
+      </div>
+      <div class="history-grid" id="history-grid"></div>
+    </div>
+  </div>
+
+  <template id="result-card-template">
+    <div class="result-card">
+      <div class="result-card-header"></div>
+      <div class="result-status">
+        <span class="spinner"></span>
+        <span class="result-status-text">Submitting...</span>
+      </div>
+      <video class="result-video" controls></video>
+      <a class="download-link" download>Download video</a>
+    </div>
+  </template>
+
+  <template id="history-card-template">
+    <div class="history-card">
+      <div class="history-card-header">
+        <span class="history-card-model"></span>
+        <span class="history-card-status"></span>
+      </div>
+      <video class="result-video" controls></video>
+      <div class="history-card-meta">
+        <div class="history-card-date"></div>
+        <div class="history-card-source"></div>
+      </div>
+      <a class="download-link" download>Download video</a>
+    </div>
+  </template>
+
+  <script src="/static/js/app.js?v={{ asset_version }}"></script>
+</body>
+</html>
