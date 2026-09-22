@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign in — AIdols</title>
+  <link rel="stylesheet" href="/static/css/style.css?v={{ asset_version }}" />
+</head>
+<body>
+  <div class="login-page">
+    <form class="login-card" method="post" action="/login">
+      <header class="brand">
+        <h1>AIdols</h1>
+        <span class="tag">Animate</span>
+      </header>
+      <p class="subtitle">Sign in to continue.</p>
+
+      {% if error %}<div class="login-error">{{ error }}</div>{% endif %}
+      {% if not credentials_configured %}
+        <div class="login-error">
+          No credentials are configured. Set <code>AUTH_USERNAME</code> and
+          <code>AUTH_PASSWORD</code> in the environment, then restart.
+        </div>
+      {% endif %}
+
+      <label class="login-field">
+        <span>Username</span>
+        <input type="text" name="username" autocomplete="username" autofocus required />
+      </label>
+      <label class="login-field">
+        <span>Password</span>
+        <input type="password" name="password" autocomplete="current-password" required />
+      </label>
+
+      <button class="generate-btn" type="submit">Sign in</button>
+    </form>
+  </div>
+</body>
+</html>

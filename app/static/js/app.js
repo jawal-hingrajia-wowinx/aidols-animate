@@ -1,12 +1,13 @@
 const state = {
   imageUrl: null,
-  videoSource: null, // { type: 'sample', sampleId, orientation } | { type: 'upload', videoUrl }
+  videoSource: null, // { type: 'sample', sampleId } | { type: 'upload', videoUrl }
+  videoDurationSeconds: null,
   samples: [],
-  models: [],
   pendingJobs: 0,
 };
 
 const el = {
+  page: document.querySelector(".page"),
   imageDropzone: document.getElementById("image-dropzone"),
   imageInput: document.getElementById("image-input"),
   imagePreview: document.getElementById("image-preview"),
@@ -16,12 +17,14 @@ const el = {
   samplesGrid: document.getElementById("samples-grid"),
   uploadOwnCard: document.getElementById("upload-own-card"),
   videoInput: document.getElementById("video-input"),
-  modelsList: document.getElementById("models-list"),
   generateBtn: document.getElementById("generate-btn"),
   resultsGrid: document.getElementById("results-grid"),
   resultCardTemplate: document.getElementById("result-card-template"),
   keepSound: document.getElementById("keep-sound"),
   promptInput: document.getElementById("prompt-input"),
+  costMain: document.getElementById("cost-estimate-main"),
+  costNote: document.getElementById("cost-estimate-note"),
+  costWarning: document.getElementById("cost-estimate-warning"),
   tabBtnGenerate: document.getElementById("tab-btn-generate"),
   tabBtnHistory: document.getElementById("tab-btn-history"),
   generateView: document.getElementById("generate-view"),
@@ -31,8 +34,29 @@ const el = {
   historyRefreshBtn: document.getElementById("history-refresh-btn"),
 };
 
+const MODEL_LABEL = el.page.dataset.modelLabel;
+
 function videoUrlForJob(job) {
   return job.stored_result_url || job.result_url;
+}
+
+// Every API call goes through here so an expired session bounces to the login
+// page instead of failing with an opaque error mid-flow.
+async function api(url, options) {
+  const res = await fetch(url, options);
+  if (res.status === 401) {
+    window.location.href = "/login";
+    throw new Error("Session expired");
+  }
+  return res;
+}
+
+async function apiError(res, fallback) {
+  try {
+    return (await res.json()).detail || fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 // ---- Tabs ----
@@ -50,12 +74,15 @@ function switchTab(tab) {
 }
 
 function updateGenerateEnabled() {
-  const anyModelChecked = el.modelsList.querySelectorAll("input[type=checkbox]:checked").length > 0;
-  el.generateBtn.disabled = !(state.imageUrl && state.videoSource && anyModelChecked);
+  el.generateBtn.disabled = !(state.imageUrl && state.videoSource);
 }
 
 function setOrientation(value) {
   document.querySelector(`input[name="orientation"][value="${value}"]`).checked = true;
+}
+
+function currentOrientation() {
+  return document.querySelector('input[name="orientation"]:checked').value;
 }
 
 // ---- Step 1: image upload ----
@@ -96,8 +123,8 @@ async function uploadImage(file) {
   try {
     const formData = new FormData();
     formData.append("file", file);
-    const res = await fetch("/api/uploads/image", { method: "POST", body: formData });
-    if (!res.ok) throw new Error((await res.json()).detail || "Upload failed");
+    const res = await api("/api/uploads/image", { method: "POST", body: formData });
+    if (!res.ok) throw new Error(await apiError(res, "Upload failed"));
     const data = await res.json();
     state.imageUrl = data.image_url;
     el.imagePreviewInfo.textContent = "Ready";
@@ -111,7 +138,7 @@ async function uploadImage(file) {
 // ---- Step 2: motion samples + custom upload ----
 
 async function loadSamples() {
-  const res = await fetch("/api/samples");
+  const res = await api("/api/samples");
   const data = await res.json();
   state.samples = data.samples || [];
   renderSamples();
@@ -150,12 +177,48 @@ function clearSelection() {
   el.samplesGrid.querySelectorAll(".sample-card").forEach((c) => c.classList.remove("selected"));
 }
 
-function selectSample(sample, cardEl) {
+// Reads the clip length off a <video>. The element may not have its metadata
+// yet when the user clicks, so wait for it rather than reporting NaN.
+function readDuration(video) {
+  return new Promise((resolve) => {
+    if (video.readyState >= 1 && Number.isFinite(video.duration)) {
+      resolve(video.duration);
+      return;
+    }
+    const done = () => {
+      cleanup();
+      resolve(Number.isFinite(video.duration) ? video.duration : null);
+    };
+    const fail = () => {
+      cleanup();
+      resolve(null);
+    };
+    const cleanup = () => {
+      video.removeEventListener("loadedmetadata", done);
+      video.removeEventListener("error", fail);
+    };
+    video.addEventListener("loadedmetadata", done);
+    video.addEventListener("error", fail);
+  });
+}
+
+function probeFileDuration(file) {
+  const video = document.createElement("video");
+  video.preload = "metadata";
+  video.src = URL.createObjectURL(file);
+  return readDuration(video).finally(() => URL.revokeObjectURL(video.src));
+}
+
+async function selectSample(sample, cardEl) {
   clearSelection();
   cardEl.classList.add("selected");
   state.videoSource = { type: "sample", sampleId: sample.id };
   setOrientation(sample.character_orientation || "video");
   updateGenerateEnabled();
+
+  const thumb = cardEl.querySelector(".sample-thumb");
+  state.videoDurationSeconds = thumb ? await readDuration(thumb) : null;
+  refreshEstimate();
 }
 
 el.videoInput.addEventListener("change", async () => {
@@ -167,89 +230,110 @@ el.videoInput.addEventListener("change", async () => {
   uploadCard.classList.add("selected");
   uploadCard.textContent = "Uploading reference video...";
 
+  // measured before the upload so the estimate can appear as soon as it lands
+  const duration = await probeFileDuration(file);
+
   try {
     const formData = new FormData();
     formData.append("file", file);
-    const res = await fetch("/api/uploads/video", { method: "POST", body: formData });
-    if (!res.ok) throw new Error((await res.json()).detail || "Upload failed");
+    const res = await api("/api/uploads/video", { method: "POST", body: formData });
+    if (!res.ok) throw new Error(await apiError(res, "Upload failed"));
     const data = await res.json();
     state.videoSource = { type: "upload", videoUrl: data.video_url };
+    state.videoDurationSeconds = duration;
     uploadCard.textContent = `✓ ${file.name}`;
+    refreshEstimate();
   } catch (err) {
     uploadCard.textContent = `Error: ${err.message}`;
     state.videoSource = null;
+    state.videoDurationSeconds = null;
+    refreshEstimate();
   }
   updateGenerateEnabled();
 });
 
-// ---- Step 4: model selection ----
+// ---- Cost estimate ----
 
-async function loadModels() {
-  const res = await fetch("/api/models");
-  const data = await res.json();
-  state.models = data.models || [];
-  renderModels();
+document.querySelectorAll('input[name="orientation"]').forEach((radio) => {
+  radio.addEventListener("change", refreshEstimate);
+});
+
+function currencySymbol(currency) {
+  return currency === "USD" ? "$" : `${currency} `;
 }
 
-function renderModels() {
-  el.modelsList.innerHTML = state.models
-    .map(
-      (model) => `
-      <label class="model-option active" data-model-key="${model.key}">
-        <input type="checkbox" value="${model.key}" checked />
-        ${model.label}
-      </label>
-    `
-    )
-    .join("");
+function money(amount, currency) {
+  return `${currencySymbol(currency)}${amount.toFixed(2)}`;
+}
 
-  el.modelsList.querySelectorAll("input[type=checkbox]").forEach((cb) => {
-    cb.addEventListener("change", () => {
-      cb.closest(".model-option").classList.toggle("active", cb.checked);
-      updateGenerateEnabled();
+// The per-second rate carries real precision ($0.112), so two decimals would
+// round it into a different number — show up to four, without trailing zeros.
+function rate(amount, currency) {
+  return `${currencySymbol(currency)}${parseFloat(amount.toFixed(4))}`;
+}
+
+async function refreshEstimate() {
+  el.costWarning.textContent = "";
+  el.costNote.textContent = "";
+
+  if (!state.videoSource) {
+    el.costMain.textContent = "Pick a reference motion to see the estimated cost.";
+    return;
+  }
+  if (!state.videoDurationSeconds) {
+    el.costMain.textContent = "Couldn't read the reference clip's length — cost unknown.";
+    return;
+  }
+
+  el.costMain.textContent = "Estimating cost...";
+
+  try {
+    const res = await api("/api/estimate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        duration_seconds: state.videoDurationSeconds,
+        character_orientation: currentOrientation(),
+      }),
     });
-  });
+    if (!res.ok) throw new Error(await apiError(res, "Estimate failed"));
+    const data = await res.json();
 
-  updateGenerateEnabled();
+    el.costMain.textContent =
+      `Estimated cost: ${money(data.cost, data.currency)} — ` +
+      `${data.seconds_billed}s at ${rate(data.price_per_second, data.currency)}/s ` +
+      `· ${data.model_label}`;
+
+    if (data.source === "rate-card") {
+      el.costNote.textContent = "Based on the published rate card — fal's live pricing was unavailable.";
+    }
+    if (data.clamped) {
+      el.costWarning.textContent =
+        `Your clip is ${Math.round(state.videoDurationSeconds)}s but this mode caps at ` +
+        `${data.max_seconds}s — fal may reject or truncate it.`;
+    }
+  } catch (err) {
+    el.costMain.textContent = `Couldn't estimate cost: ${err.message}`;
+  }
 }
 
-function selectedModels() {
-  return Array.from(el.modelsList.querySelectorAll("input[type=checkbox]:checked")).map(
-    (cb) => cb.value
-  );
-}
-
-function modelLabel(modelKey) {
-  const model = state.models.find((m) => m.key === modelKey);
-  return model ? model.label : modelKey;
-}
-
-// ---- Step 3 + generate ----
+// ---- Generate ----
 
 el.generateBtn.addEventListener("click", generate);
 
 async function generate() {
-  const models = selectedModels();
-  if (!models.length) return;
-
   el.generateBtn.disabled = true;
   el.resultsGrid.innerHTML = "";
-  state.pendingJobs = models.length;
+  state.pendingJobs = 1;
 
-  const cardsByModel = {};
-  models.forEach((modelKey) => {
-    const card = createResultCard(modelKey);
-    cardsByModel[modelKey] = card;
-    el.resultsGrid.appendChild(card);
-  });
+  const card = createResultCard(MODEL_LABEL);
+  el.resultsGrid.appendChild(card);
 
-  const orientation = document.querySelector('input[name="orientation"]:checked').value;
   const prompt = el.promptInput.value.trim();
   const body = {
     image_url: state.imageUrl,
-    character_orientation: orientation,
+    character_orientation: currentOrientation(),
     keep_original_sound: el.keepSound.checked,
-    models,
   };
   if (prompt) {
     body.prompt = prompt;
@@ -261,27 +345,25 @@ async function generate() {
   }
 
   try {
-    const res = await fetch("/api/generate", {
+    const res = await api("/api/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (!res.ok) throw new Error((await res.json()).detail || "Failed to start generation");
-    const { jobs } = await res.json();
+    if (!res.ok) throw new Error(await apiError(res, "Failed to start generation"));
+    const job = await res.json();
 
-    jobs.forEach((job) => {
-      const card = cardsByModel[job.model];
-      if (job.error) {
-        setCardStatus(card, `Failed: ${job.error}`, false, true);
-        jobDone();
-      } else {
-        pollJob(job.job_id, card);
-      }
-    });
+    if (job.model_label) {
+      card.querySelector(".result-card-header").textContent = job.model_label;
+    }
+    if (job.error) {
+      setCardStatus(card, `Failed: ${job.error}`, false, true);
+      jobDone();
+    } else {
+      pollJob(job.job_id, card);
+    }
   } catch (err) {
-    models.forEach((modelKey) => {
-      setCardStatus(cardsByModel[modelKey], `Error: ${err.message}`, false, true);
-    });
+    setCardStatus(card, `Error: ${err.message}`, false, true);
     state.pendingJobs = 0;
     el.generateBtn.disabled = false;
   }
@@ -294,10 +376,10 @@ function jobDone() {
   }
 }
 
-function createResultCard(modelKey) {
+function createResultCard(label) {
   const fragment = el.resultCardTemplate.content.cloneNode(true);
   const card = fragment.querySelector(".result-card");
-  card.querySelector(".result-card-header").textContent = modelLabel(modelKey);
+  card.querySelector(".result-card-header").textContent = label;
   return card;
 }
 
@@ -312,7 +394,7 @@ async function pollJob(jobId, card) {
   setCardStatus(card, "Submitted...", true);
 
   const tick = async () => {
-    const res = await fetch(`/api/jobs/${jobId}`);
+    const res = await api(`/api/jobs/${jobId}`);
     const job = await res.json();
 
     if (job.status === "completed") {
@@ -345,7 +427,7 @@ async function pollJob(jobId, card) {
 el.historyRefreshBtn.addEventListener("click", loadHistory);
 
 async function loadHistory() {
-  const res = await fetch("/api/history");
+  const res = await api("/api/history");
   const data = await res.json();
   const jobs = data.jobs || [];
 
@@ -403,9 +485,8 @@ function pollHistoryJob(jobId, card) {
     // the card may have been replaced by a full-grid refresh in the meantime
     if (!el.historyGrid.contains(card)) return;
 
-    const res = await fetch(`/api/jobs/${jobId}`);
+    const res = await api(`/api/jobs/${jobId}`);
     const job = await res.json();
-    job.model_label = modelLabel(job.model);
     applyJobToHistoryCard(card, job);
 
     if (job.status !== "completed" && job.status !== "failed") {
@@ -417,4 +498,3 @@ function pollHistoryJob(jobId, card) {
 }
 
 loadSamples();
-loadModels();

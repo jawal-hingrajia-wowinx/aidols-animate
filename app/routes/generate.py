@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import uuid
 from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, model_validator
 
 from .. import config, db, fal_service, storage
 
@@ -20,17 +19,6 @@ class GenerateRequest(BaseModel):
     character_orientation: Literal["image", "video"] = "video"
     prompt: Optional[str] = None
     keep_original_sound: bool = True
-    models: list[str] = Field(default_factory=lambda: [fal_service.DEFAULT_MODEL_KEY])
-
-    @field_validator("models")
-    @classmethod
-    def _validate_models(cls, models: list[str]) -> list[str]:
-        if not models:
-            raise ValueError("Select at least one model")
-        unknown = [m for m in models if m not in fal_service.MODELS]
-        if unknown:
-            raise ValueError(f"Unknown model(s): {', '.join(unknown)}")
-        return models
 
     @model_validator(mode="after")
     def _one_video_source(self):
@@ -58,6 +46,11 @@ async def _submit_one(model_key: str, job_id: str, image_url: str, video_url: st
         prompt=req.prompt,
         keep_original_sound=req.keep_original_sound,
     )
+    result = {
+        "job_id": job_id,
+        "model": model_key,
+        "model_label": fal_service.label_for(model_key),
+    }
     try:
         request_id = await fal_service.submit_generation(
             model_key,
@@ -69,19 +62,10 @@ async def _submit_one(model_key: str, job_id: str, image_url: str, video_url: st
         )
     except Exception as exc:
         await db.update_status(job_id, "failed", error=str(exc))
-        return {"job_id": job_id, "model": model_key, "error": str(exc)}
+        return {**result, "error": str(exc)}
 
     await db.set_fal_request_id(job_id, request_id, status="submitted")
-    return {"job_id": job_id, "model": model_key}
-
-
-@router.get("/models")
-def list_models():
-    return {
-        "models": [
-            {"key": spec.key, "label": spec.label} for spec in fal_service.MODELS.values()
-        ]
-    }
+    return result
 
 
 @router.post("/generate")
@@ -96,13 +80,13 @@ async def generate(req: GenerateRequest):
     else:
         video_url = req.video_url
 
-    jobs = await asyncio.gather(
-        *[
-            _submit_one(model_key, uuid.uuid4().hex, req.image_url, video_url, req)
-            for model_key in req.models
-        ]
+    return await _submit_one(
+        fal_service.DEFAULT_MODEL_KEY, uuid.uuid4().hex, req.image_url, video_url, req
     )
-    return {"jobs": jobs}
+
+
+def _with_label(job: dict) -> dict:
+    return {**job, "model_label": fal_service.label_for(job["model"])}
 
 
 @router.get("/jobs/{job_id}")
@@ -112,11 +96,16 @@ async def get_job(job_id: str):
         raise HTTPException(404, "Job not found")
 
     if job["status"] in ("completed", "failed") or not job["fal_request_id"]:
-        return job
+        return _with_label(job)
 
+    # an in-flight job from a model we've since retired can't be polled anymore
     if job["model"] not in fal_service.MODELS:
-        await db.update_status(job_id, "failed", error=f"Model '{job['model']}' is no longer available")
-        return await db.get_job(job_id)
+        await db.update_status(
+            job_id,
+            "failed",
+            error=f"Retired model '{job['model']}' — this generation can no longer be tracked",
+        )
+        return _with_label(await db.get_job(job_id))
 
     status = await fal_service.get_status(job["model"], job["fal_request_id"])
     status_name = type(status).__name__  # Queued / InProgress / Completed
@@ -141,4 +130,4 @@ async def get_job(job_id: str):
     else:
         await db.update_status(job_id, status_name.lower())
 
-    return await db.get_job(job_id)
+    return _with_label(await db.get_job(job_id))

@@ -7,10 +7,14 @@
   <link rel="stylesheet" href="/static/css/style.css?v={{ asset_version }}" />
 </head>
 <body>
-  <div class="page">
+  <div class="page" data-model-label="{{ model_label }}">
     <header class="brand">
       <h1>AIdols</h1>
       <span class="tag">Animate</span>
+      <form class="session-form" method="post" action="/logout">
+        <span class="session-user">{{ username }}</span>
+        <button class="logout-btn" type="submit">Log out</button>
+      </form>
     </header>
     <p class="subtitle">Turn a photo into a moving character using a reference motion clip.</p>
 
@@ -76,14 +80,13 @@
         </div>
       </section>
 
-      <section class="step">
-        <div class="step-label">
-          <span class="step-number">4</span>
-          <span class="step-title">Compare models</span>
+      <div class="cost-estimate" id="cost-estimate">
+        <div class="cost-estimate-main" id="cost-estimate-main">
+          Pick a reference motion to see the estimated cost.
         </div>
-        <div class="models-list" id="models-list"></div>
-        <div class="hint models-cost-hint">Each checked model runs as its own paid generation — uncheck any you don't want to spend on.</div>
-      </section>
+        <div class="cost-estimate-note" id="cost-estimate-note"></div>
+        <div class="cost-estimate-warning" id="cost-estimate-warning"></div>
+      </div>
 
       <button class="generate-btn" id="generate-btn" disabled>Generate Video</button>
 

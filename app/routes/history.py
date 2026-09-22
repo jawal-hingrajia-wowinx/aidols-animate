@@ -9,6 +9,5 @@ router = APIRouter(prefix="/api", tags=["history"])
 async def get_history(limit: int = 200):
     jobs = await db.list_jobs(limit=limit)
     for job in jobs:
-        spec = fal_service.MODELS.get(job["model"])
-        job["model_label"] = spec.label if spec else job["model"]
+        job["model_label"] = fal_service.label_for(job["model"])
     return {"jobs": jobs}

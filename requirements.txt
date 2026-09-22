@@ -1,9 +1,13 @@
-fastapi
-uvicorn[standard]
-python-multipart
-fal-client
-python-dotenv
-jinja2
-httpx
-asyncpg
-vercel
+# Pinned to the versions this app was tested against. Vercel installs these at
+# build time, so unpinned names would let an upstream release break a build
+# with no change on our side.
+fastapi==0.141.1
+uvicorn[standard]==0.53.0
+python-multipart==0.0.32
+fal-client==1.0.3
+python-dotenv==1.2.3
+jinja2==3.1.6
+httpx==0.28.1
+asyncpg==0.31.0
+vercel==0.11.3
+itsdangerous==2.2.0
