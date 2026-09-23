@@ -34,7 +34,14 @@ def _resolve_sample(sample_id: str) -> dict | None:
     return None
 
 
-async def _submit_one(model_key: str, job_id: str, image_url: str, video_url: str, req: GenerateRequest):
+async def _submit_one(
+    model_key: str,
+    job_id: str,
+    image_url: str,
+    video_url: str,
+    req: GenerateRequest,
+    prompt: str | None,
+):
     await db.create_job(
         job_id=job_id,
         model=model_key,
@@ -42,7 +49,7 @@ async def _submit_one(model_key: str, job_id: str, image_url: str, video_url: st
         video_url=video_url,
         source=f"sample:{req.sample_id}" if req.sample_id else "upload",
         character_orientation=fal_service.CHARACTER_ORIENTATION,
-        prompt=req.prompt,
+        prompt=prompt,
         keep_original_sound=req.keep_original_sound,
     )
     result = {
@@ -56,7 +63,7 @@ async def _submit_one(model_key: str, job_id: str, image_url: str, video_url: st
             image_url=image_url,
             video_url=video_url,
             character_orientation=fal_service.CHARACTER_ORIENTATION,
-            prompt=req.prompt,
+            prompt=prompt,
             keep_original_sound=req.keep_original_sound,
         )
     except Exception as exc:
@@ -69,6 +76,7 @@ async def _submit_one(model_key: str, job_id: str, image_url: str, video_url: st
 
 @router.post("/generate")
 async def generate(req: GenerateRequest):
+    default_prompt = None
     if req.sample_id:
         sample = _resolve_sample(req.sample_id)
         if not sample:
@@ -76,11 +84,18 @@ async def generate(req: GenerateRequest):
         if not sample.get("video_url"):
             raise HTTPException(404, f"Sample video not available yet: {req.sample_id}")
         video_url = sample["video_url"]
+        default_prompt = sample.get("default_prompt")
     else:
         video_url = req.video_url
 
+    # Each sample carries a prompt tuned to its motion — mainly to stop the model
+    # dropping the ball, which it does when nothing names it. Anything the user
+    # types wins; resolved here rather than in the browser so the default still
+    # applies to a direct API call.
+    prompt = (req.prompt or "").strip() or default_prompt
+
     return await _submit_one(
-        fal_service.DEFAULT_MODEL_KEY, uuid.uuid4().hex, req.image_url, video_url, req
+        fal_service.DEFAULT_MODEL_KEY, uuid.uuid4().hex, req.image_url, video_url, req, prompt
     )
 
 

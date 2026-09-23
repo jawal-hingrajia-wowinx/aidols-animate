@@ -5,28 +5,32 @@
       "name": "Celebration Jump",
       "description": "Goal celebration: jump with arms spread wide, quick turn.",
       "video_url": "https://wy3drc9hltbv0dgd.public.blob.vercel-storage.com/samples/ronaldo_sui_v2-YyuAEaeBBBesIEtHm9IcEmy6BVNKmf.mp4",
-      "character_orientation": "video"
+      "character_orientation": "video",
+      "default_prompt": "A footballer celebrating a goal: leaping with both arms spread wide, then turning quickly. Keep the whole body in frame and the movement energetic."
     },
     {
       "id": "penalty-shot",
       "name": "Penalty Kick Run-up",
       "description": "Running up and striking a penalty kick, low-angle night shot.",
       "video_url": "https://wy3drc9hltbv0dgd.public.blob.vercel-storage.com/samples/penalty-shot-V4pzBX7P7xjH0iwufWAEzkz5Mz0TNq.mp4",
-      "character_orientation": "video"
+      "character_orientation": "video",
+      "default_prompt": "A footballer running up and striking a penalty kick at night. Keep the football visible at their feet through the run-up, and show the strike clearly."
     },
     {
       "id": "freestyle-night-pitch",
       "name": "Freestyle Juggling (Night Pitch)",
       "description": "Solo freestyle ball juggling on an empty floodlit pitch, full body, 6s.",
       "video_url": "https://wy3drc9hltbv0dgd.public.blob.vercel-storage.com/samples/freestyle-night-pitch-0GcrJ7I5qH5qHq2GswPyBzgUQ33Rzk.mp4",
-      "character_orientation": "video"
+      "character_orientation": "video",
+      "default_prompt": "A footballer freestyling on a floodlit pitch, juggling a football continuously. Keep the ball visible throughout, in contact with their feet and knees."
     },
     {
       "id": "freestyle-parking-lot",
       "name": "Freestyle Juggling (Parking Lot)",
       "description": "Solo freestyle ball juggling in an empty parking lot, full body, 6s.",
       "video_url": "https://wy3drc9hltbv0dgd.public.blob.vercel-storage.com/samples/freestyle-parking-lot-yq6UeBI2IiiUOpW7z6ipFWU9ef2iGT.mp4",
-      "character_orientation": "video"
+      "character_orientation": "video",
+      "default_prompt": "A footballer freestyling in an empty parking lot, juggling a football continuously. Keep the ball visible throughout, in contact with their feet and knees."
     }
   ]
 }

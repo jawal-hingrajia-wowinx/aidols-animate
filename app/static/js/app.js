@@ -22,6 +22,7 @@ const el = {
   resultCardTemplate: document.getElementById("result-card-template"),
   keepSound: document.getElementById("keep-sound"),
   promptInput: document.getElementById("prompt-input"),
+  promptDefaultNote: document.getElementById("prompt-default-note"),
   costMain: document.getElementById("cost-estimate-main"),
   costNote: document.getElementById("cost-estimate-note"),
   costWarning: document.getElementById("cost-estimate-warning"),
@@ -42,6 +43,7 @@ const el = {
 };
 
 const MODEL_LABEL = el.page.dataset.modelLabel;
+const GENERIC_PROMPT_PLACEHOLDER = el.promptInput.placeholder;
 
 function videoUrlForJob(job) {
   return job.stored_result_url || job.result_url;
@@ -516,10 +518,18 @@ function probeFileDuration(file) {
   return readDuration(video).finally(() => URL.revokeObjectURL(video.src));
 }
 
+function setPromptPlaceholder(defaultPrompt) {
+  el.promptInput.placeholder = defaultPrompt || GENERIC_PROMPT_PLACEHOLDER;
+  el.promptDefaultNote.textContent = defaultPrompt
+    ? "Leave blank and this clip's own prompt is used."
+    : "";
+}
+
 async function selectSample(sample, cardEl) {
   clearSelection();
   cardEl.classList.add("selected");
   state.videoSource = { type: "sample", sampleId: sample.id };
+  setPromptPlaceholder(sample.default_prompt);
   updateGenerateEnabled();
 
   const thumb = cardEl.querySelector(".sample-thumb");
@@ -561,6 +571,7 @@ el.videoInput.addEventListener("change", async () => {
     );
     state.videoSource = { type: "upload", videoUrl };
     state.videoDurationSeconds = duration;
+    setPromptPlaceholder(null);
     uploadCard.textContent = `✓ ${file.name}`;
     refreshEstimate();
   } catch (err) {
