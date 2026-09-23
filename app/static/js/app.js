@@ -167,6 +167,7 @@ const DISPLAY_MAX_EDGE = 2000;
 
 const crop = {
   cropper: null,
+  exporting: false,
   bitmap: null, // full-resolution, EXIF-oriented
   displayScale: 1, // displayed px -> source px
   sourceName: "image.jpg",
@@ -366,7 +367,14 @@ function selectFullImage() {
   updateCropReadout();
 }
 
-el.cropperFull.addEventListener("click", selectFullImage);
+// Both of these finish the step — "Use full image" previously only reset the
+// selection, which is invisible when the selection is already the whole image
+// (the default on open), so it read as a dead button sitting between two that
+// do close the dialog.
+el.cropperFull.addEventListener("click", async () => {
+  selectFullImage();
+  await confirmCrop();
+});
 el.cropperCancel.addEventListener("click", closeCropper);
 el.cropperConfirm.addEventListener("click", confirmCrop);
 
@@ -390,6 +398,20 @@ async function encodeWithinLimit(canvas) {
 }
 
 async function confirmCrop() {
+  if (crop.exporting) return;
+  crop.exporting = true;
+  el.cropperConfirm.disabled = true;
+  el.cropperFull.disabled = true;
+  try {
+    await exportCrop();
+  } finally {
+    crop.exporting = false;
+    el.cropperFull.disabled = false;
+    // the confirm button is re-enabled by the next updateCropReadout
+  }
+}
+
+async function exportCrop() {
   const src = currentCropSourcePx();
   const out = exportSize(src.width, src.height);
 
@@ -403,6 +425,7 @@ async function confirmCrop() {
   const blob = await encodeWithinLimit(canvas);
   if (!blob) {
     el.cropperWarning.textContent = "Couldn't compress this crop small enough - try a tighter crop.";
+    el.cropperConfirm.disabled = false;
     return;
   }
 
