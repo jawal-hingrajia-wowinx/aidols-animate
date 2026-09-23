@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 
 import fal_client
+import httpx
+
+from . import config
+
+FAL_REST_URL = "https://rest.fal.ai"
 
 
 def _kling_arguments(
@@ -106,3 +112,51 @@ async def get_status(model_key: str, request_id: str):
 async def get_result(model_key: str, request_id: str) -> dict:
     spec = MODELS[model_key]
     return await fal_client.result_async(spec.fal_id, request_id)
+
+
+# ---- Browser-direct uploads ----
+#
+# Vercel caps a function request body at 4.5MB, which a 30s reference clip blows
+# straight past. Rather than proxy the bytes, the server mints a short-lived-ish
+# CDN credential and the browser POSTs the file to fal directly. FAL_KEY itself
+# never reaches the client.
+#
+# The token fal returns is upload-only - it cannot start generations or spend
+# money - but it is valid for 30 days and fal exposes no way to shorten that,
+# so treat it as a credential and only hand it to signed-in users.
+
+_cdn_token: dict | None = None
+_CDN_REFRESH_MARGIN = timedelta(hours=1)
+
+
+async def get_cdn_upload_token() -> dict:
+    """{upload_url, authorization, expires_at} for a browser to upload with."""
+    global _cdn_token
+
+    now = datetime.now(timezone.utc)
+    if _cdn_token and _cdn_token["_expires_at"] - now > _CDN_REFRESH_MARGIN:
+        return _cdn_token
+
+    if not config.FAL_KEY:
+        raise RuntimeError("FAL_KEY is not configured")
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.post(
+            f"{FAL_REST_URL}/storage/auth/token?storage_type=fal-cdn-v3",
+            headers={
+                "Authorization": f"Key {config.FAL_KEY}",
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+            json={},
+        )
+        response.raise_for_status()
+        data = response.json()
+
+    _cdn_token = {
+        "upload_url": f"{data['base_url']}/files/upload",
+        "authorization": f"{data['token_type']} {data['token']}",
+        "expires_at": data["expires_at"],
+        "_expires_at": datetime.fromisoformat(data["expires_at"]),
+    }
+    return _cdn_token

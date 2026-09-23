@@ -665,3 +665,143 @@ input[type="radio"] {
 .login-error code {
   font-size: 12px;
 }
+
+/* ---- Crop modal (crop- prefix: .cropper-* is Cropper.js own namespace) ---- */
+
+/* .crop-modal sets display:flex, which outranks the UA stylesheet's
+   [hidden]{display:none} - without this the modal is never actually hidden */
+.crop-modal[hidden] {
+  display: none;
+}
+
+.crop-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.75);
+}
+
+.crop-panel {
+  width: 100%;
+  max-width: 640px;
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 20px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius);
+  background: var(--card-bg);
+}
+
+.crop-title {
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.crop-head {
+  margin-bottom: 14px;
+}
+
+/* Cropper.js needs an explicit height to lay the stage out */
+.crop-stage {
+  /* positioned so Cropper.js's absolutely-placed layers stay inside it */
+  position: relative;
+  height: 46vh;
+  min-height: 240px;
+  background: var(--bg);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.crop-stage img {
+  display: block;
+  max-width: 100%;
+}
+
+.crop-readout {
+  margin-top: 12px;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.crop-warning {
+  margin-top: 6px;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.crop-warning:empty {
+  display: none;
+}
+
+.crop-actions {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ghost-btn {
+  padding: 10px 16px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.ghost-btn:hover {
+  color: var(--text);
+  border-color: var(--card-border-hover);
+}
+
+.crop-confirm-btn {
+  padding: 10px 18px;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: #1a1a1a;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.crop-confirm-btn:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.crop-confirm-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* tint Cropper.js's own chrome to match the app */
+.cropper-view-box,
+.cropper-face {
+  outline-color: var(--accent);
+}
+
+.cropper-line,
+.cropper-point {
+  background-color: var(--accent);
+}
+
+@media (max-width: 560px) {
+  .crop-actions {
+    justify-content: stretch;
+  }
+  .crop-actions button {
+    flex: 1 1 auto;
+  }
+}

@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AIdols — Animate</title>
+  <link rel="stylesheet" href="/static/vendor/cropper.min.css" />
   <link rel="stylesheet" href="/static/css/style.css?v={{ asset_version }}" />
 </head>
 <body>
@@ -102,6 +103,26 @@
     </div>
   </div>
 
+
+  <div class="crop-modal" id="cropper-modal" hidden>
+    <div class="crop-panel">
+      <div class="crop-head">
+        <div class="crop-title">Frame your photo</div>
+        <div class="hint">Crop to the character &mdash; they animate best filling a good part of the frame.</div>
+      </div>
+      <div class="crop-stage">
+        <img id="cropper-image" alt="Image being cropped" />
+      </div>
+      <div class="crop-readout" id="cropper-readout"></div>
+      <div class="crop-warning" id="cropper-warning"></div>
+      <div class="crop-actions">
+        <button class="ghost-btn" id="cropper-cancel" type="button">Cancel</button>
+        <button class="ghost-btn" id="cropper-full" type="button">Use full image</button>
+        <button class="crop-confirm-btn" id="cropper-confirm" type="button">Use this crop</button>
+      </div>
+    </div>
+  </div>
+
   <template id="result-card-template">
     <div class="result-card">
       <div class="result-card-header"></div>
@@ -129,6 +150,7 @@
     </div>
   </template>
 
+  <script src="/static/vendor/cropper.min.js"></script>
   <script src="/static/js/app.js?v={{ asset_version }}"></script>
 </body>
 </html>

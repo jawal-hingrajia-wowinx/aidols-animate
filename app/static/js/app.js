@@ -32,6 +32,13 @@ const el = {
   historyGrid: document.getElementById("history-grid"),
   historyCardTemplate: document.getElementById("history-card-template"),
   historyRefreshBtn: document.getElementById("history-refresh-btn"),
+  cropperModal: document.getElementById("cropper-modal"),
+  cropperImage: document.getElementById("cropper-image"),
+  cropperReadout: document.getElementById("cropper-readout"),
+  cropperWarning: document.getElementById("cropper-warning"),
+  cropperCancel: document.getElementById("cropper-cancel"),
+  cropperFull: document.getElementById("cropper-full"),
+  cropperConfirm: document.getElementById("cropper-confirm"),
 };
 
 const MODEL_LABEL = el.page.dataset.modelLabel;
@@ -85,7 +92,92 @@ function currentOrientation() {
   return document.querySelector('input[name="orientation"]:checked').value;
 }
 
-// ---- Step 1: image upload ----
+
+// ---- Direct-to-fal upload ----
+//
+// Vercel caps a function request body at 4.5MB, so anything sizeable (a 30s
+// reference clip is routinely 20MB+) cannot be proxied through our own API.
+// The server mints an upload credential and the bytes go straight to fal.
+// XHR rather than fetch, because only XHR reports upload progress.
+
+async function uploadToFal(blob, filename, onProgress) {
+  const res = await api("/api/uploads/token", { method: "POST" });
+  if (!res.ok) throw new Error(await apiError(res, "Couldn't get an upload token"));
+  const { upload_url, authorization } = await res.json();
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", upload_url, true);
+    xhr.setRequestHeader("Authorization", authorization);
+    xhr.setRequestHeader("Content-Type", blob.type || "application/octet-stream");
+    xhr.setRequestHeader("X-Fal-File-Name", filename);
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total);
+    };
+    xhr.onload = () => {
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new Error(`Upload failed (${xhr.status})`));
+        return;
+      }
+      try {
+        const url = JSON.parse(xhr.responseText).access_url;
+        url ? resolve(url) : reject(new Error("Upload returned no URL"));
+      } catch {
+        reject(new Error("Upload returned an unreadable response"));
+      }
+    };
+    xhr.onerror = () => reject(new Error("Network error during upload"));
+    xhr.onabort = () => reject(new Error("Upload cancelled"));
+    xhr.send(blob);
+  });
+}
+
+// Falls back to proxying through our own API, which still works for anything
+// under the 4.5MB body cap, if the direct route is unavailable.
+async function uploadWithFallback(blob, filename, endpoint, urlKey, onProgress) {
+  try {
+    return await uploadToFal(blob, filename, onProgress);
+  } catch (err) {
+    if (blob.size > MAX_PROXY_BYTES) throw err;
+    const formData = new FormData();
+    formData.append("file", blob, filename);
+    const res = await api(endpoint, { method: "POST", body: formData });
+    if (!res.ok) throw new Error(await apiError(res, "Upload failed"));
+    return (await res.json())[urlKey];
+  }
+}
+
+// ---- Step 1: image upload + crop ----
+
+// Kling Pro motion-control input limits. minShortEdge and the aspect band are
+// enforced while dragging; maxLongEdge is applied on export instead, so the
+// user is never blocked from selecting the whole of a large photo.
+const IMAGE_LIMITS = {
+  minShortEdge: 340,
+  maxLongEdge: 3850,
+  minAspect: 1 / 2.5,
+  maxAspect: 2.5,
+  maxBytes: 12 * 1024 * 1024, // generous: direct upload isn't bound by the 4.5MB body cap
+};
+
+// what the proxied fallback can still carry (Vercel's request body limit)
+const MAX_PROXY_BYTES = 4 * 1024 * 1024;
+// sanity ceiling for a reference clip, well above a 30s 1080p export
+const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
+
+// The cropper only ever displays a downscaled copy — a 48MP photo drawn at full
+// size can exhaust memory on mobile. Crop coordinates are scaled back up to the
+// source bitmap on export, so nothing is lost.
+const DISPLAY_MAX_EDGE = 2000;
+
+const crop = {
+  cropper: null,
+  bitmap: null, // full-resolution, EXIF-oriented
+  displayScale: 1, // displayed px -> source px
+  sourceName: "image.jpg",
+  clamping: false,
+};
 
 el.imageDropzone.addEventListener("click", () => el.imageInput.click());
 
@@ -98,12 +190,13 @@ el.imageDropzone.addEventListener("click", () => el.imageInput.click());
 
 el.imageDropzone.addEventListener("drop", (e) => {
   const file = e.dataTransfer.files[0];
-  if (file) uploadImage(file);
+  if (file) openCropper(file);
 });
 
 el.imageInput.addEventListener("change", () => {
   const file = el.imageInput.files[0];
-  if (file) uploadImage(file);
+  if (file) openCropper(file);
+  el.imageInput.value = ""; // so picking the same file twice still fires
 });
 
 el.imagePreviewRemove.addEventListener("click", () => {
@@ -114,20 +207,232 @@ el.imagePreviewRemove.addEventListener("click", () => {
   updateGenerateEnabled();
 });
 
-async function uploadImage(file) {
+function largestValidRect(width, height) {
+  const ratio = width / height;
+  if (ratio > IMAGE_LIMITS.maxAspect) {
+    return { width: Math.round(height * IMAGE_LIMITS.maxAspect), height };
+  }
+  if (ratio < IMAGE_LIMITS.minAspect) {
+    return { width, height: Math.round(width / IMAGE_LIMITS.minAspect) };
+  }
+  return { width, height };
+}
+
+// Only shrinks. The aspect band guarantees the short edge stays above
+// minShortEdge: at 2.5:1 a 3850px long edge still leaves 1540px.
+function exportSize(width, height) {
+  const longEdge = Math.max(width, height);
+  const scale = longEdge > IMAGE_LIMITS.maxLongEdge ? IMAGE_LIMITS.maxLongEdge / longEdge : 1;
+  return { width: Math.round(width * scale), height: Math.round(height * scale), scale };
+}
+
+async function openCropper(file) {
+  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+    showImageError(`Unsupported file type: ${file.type || "unknown"}`);
+    return;
+  }
+
+  let bitmap;
+  try {
+    // from-image applies the EXIF rotation flag; without it phone photos crop sideways
+    bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+  } catch {
+    showImageError("Couldn't read that image file.");
+    return;
+  }
+
+  if (Math.min(bitmap.width, bitmap.height) < IMAGE_LIMITS.minShortEdge) {
+    showImageError(
+      `Image is only ${bitmap.width}x${bitmap.height}. The shorter side must be at least ` +
+        `${IMAGE_LIMITS.minShortEdge}px for this model.`
+    );
+    bitmap.close?.();
+    return;
+  }
+
+  crop.bitmap = bitmap;
+  crop.sourceName = file.name || "image.jpg";
+
+  const displayScale = Math.min(1, DISPLAY_MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+  crop.displayScale = displayScale;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(bitmap.width * displayScale);
+  canvas.height = Math.round(bitmap.height * displayScale);
+  canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+
+  el.cropperImage.src = canvas.toDataURL("image/jpeg", 0.92);
+  el.cropperModal.hidden = false;
+  el.cropperWarning.textContent = "";
+
+  initCropper();
+}
+
+function initCropper() {
+  crop.cropper?.destroy();
+  crop.cropper = new Cropper(el.cropperImage, {
+    viewMode: 1,
+    autoCropArea: 1,
+    background: false,
+    responsive: true,
+    dragMode: "move",
+    toggleDragModeOnDblclick: false,
+    ready: () => selectFullImage(),
+    crop: onCropChange,
+  });
+}
+
+// Cropper keeps the canvas size it was built with, so after a viewport change
+// (rotating a phone mid-crop) viewMode:1 would confine the selection to the old
+// layout and make the full image unselectable. Rebuilding re-fits it.
+let cropResizeTimer = null;
+window.addEventListener("resize", () => {
+  if (el.cropperModal.hidden || !crop.cropper) return;
+  clearTimeout(cropResizeTimer);
+  cropResizeTimer = setTimeout(initCropper, 200);
+});
+
+// Clamps the selection into the allowed aspect band as the user drags, rather
+// than letting them build an invalid crop and rejecting it at the end.
+function onCropChange() {
+  if (!crop.cropper || crop.clamping) return;
+  const d = crop.cropper.getData(true);
+  if (!d.width || !d.height) return;
+
+  const ratio = d.width / d.height;
+  let next = null;
+  if (ratio > IMAGE_LIMITS.maxAspect) {
+    next = { ...d, width: Math.round(d.height * IMAGE_LIMITS.maxAspect) };
+  } else if (ratio < IMAGE_LIMITS.minAspect) {
+    next = { ...d, height: Math.round(d.width / IMAGE_LIMITS.minAspect) };
+  }
+
+  if (next) {
+    crop.clamping = true;
+    crop.cropper.setData(next);
+    crop.clamping = false;
+  }
+
+  updateCropReadout();
+}
+
+function currentCropSourcePx() {
+  const d = crop.cropper.getData(true);
+  const x = Math.max(0, Math.round(d.x / crop.displayScale));
+  const y = Math.max(0, Math.round(d.y / crop.displayScale));
+  // Scaling display coords back up can land a pixel past the edge; sampling
+  // outside the bitmap would leave a black seam in the exported JPEG.
+  return {
+    x,
+    y,
+    width: Math.min(Math.round(d.width / crop.displayScale), crop.bitmap.width - x),
+    height: Math.min(Math.round(d.height / crop.displayScale), crop.bitmap.height - y),
+  };
+}
+
+function updateCropReadout() {
+  const src = currentCropSourcePx();
+  const out = exportSize(src.width, src.height);
+  const shortEdge = Math.min(out.width, out.height);
+  const tooSmall = shortEdge < IMAGE_LIMITS.minShortEdge;
+
+  el.cropperReadout.textContent =
+    `Output ${out.width} x ${out.height}px` +
+    (out.scale < 1 ? ` (scaled down from ${src.width} x ${src.height})` : "") +
+    ` - ratio ${(out.width / out.height).toFixed(2)}:1`;
+
+  el.cropperWarning.textContent = tooSmall
+    ? `Crop too small - the shorter side must be at least ${IMAGE_LIMITS.minShortEdge}px.`
+    : "";
+  el.cropperConfirm.disabled = tooSmall;
+}
+
+function selectFullImage() {
+  if (!crop.cropper) return;
+  const img = crop.cropper.getImageData();
+  const full = largestValidRect(img.naturalWidth, img.naturalHeight);
+  crop.clamping = true;
+  crop.cropper.setData({
+    x: Math.round((img.naturalWidth - full.width) / 2),
+    y: Math.round((img.naturalHeight - full.height) / 2),
+    width: full.width,
+    height: full.height,
+  });
+  crop.clamping = false;
+  updateCropReadout();
+}
+
+el.cropperFull.addEventListener("click", selectFullImage);
+el.cropperCancel.addEventListener("click", closeCropper);
+el.cropperConfirm.addEventListener("click", confirmCrop);
+
+function closeCropper() {
+  crop.cropper?.destroy();
+  crop.cropper = null;
+  crop.bitmap?.close?.();
+  crop.bitmap = null;
+  el.cropperImage.src = "";
+  el.cropperModal.hidden = true;
+}
+
+// Re-encodes as JPEG, stepping quality down if the result would exceed the
+// upload cap (Vercel rejects request bodies over ~4.5MB).
+async function encodeWithinLimit(canvas) {
+  for (const quality of [0.92, 0.85, 0.75, 0.65, 0.5]) {
+    const blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", quality));
+    if (blob && blob.size <= IMAGE_LIMITS.maxBytes) return blob;
+  }
+  return null;
+}
+
+async function confirmCrop() {
+  const src = currentCropSourcePx();
+  const out = exportSize(src.width, src.height);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = out.width;
+  canvas.height = out.height;
+  canvas
+    .getContext("2d")
+    .drawImage(crop.bitmap, src.x, src.y, src.width, src.height, 0, 0, out.width, out.height);
+
+  const blob = await encodeWithinLimit(canvas);
+  if (!blob) {
+    el.cropperWarning.textContent = "Couldn't compress this crop small enough - try a tighter crop.";
+    return;
+  }
+
+  const previewUrl = canvas.toDataURL("image/jpeg", 0.7);
+  closeCropper();
+  uploadImage(blob, previewUrl, `${out.width}x${out.height}`);
+}
+
+function showImageError(message) {
+  el.imagePreview.classList.add("visible");
+  el.imageDropzone.style.display = "none";
+  el.imagePreviewImg.removeAttribute("src");
+  el.imagePreviewInfo.textContent = `Error: ${message}`;
+  state.imageUrl = null;
+  updateGenerateEnabled();
+}
+
+async function uploadImage(blob, previewUrl, dimensions) {
   el.imagePreviewInfo.textContent = "Uploading...";
   el.imagePreview.classList.add("visible");
   el.imageDropzone.style.display = "none";
-  el.imagePreviewImg.src = URL.createObjectURL(file);
+  el.imagePreviewImg.src = previewUrl;
 
   try {
-    const formData = new FormData();
-    formData.append("file", file);
-    const res = await api("/api/uploads/image", { method: "POST", body: formData });
-    if (!res.ok) throw new Error(await apiError(res, "Upload failed"));
-    const data = await res.json();
-    state.imageUrl = data.image_url;
-    el.imagePreviewInfo.textContent = "Ready";
+    state.imageUrl = await uploadWithFallback(
+      blob,
+      "crop.jpg",
+      "/api/uploads/image",
+      "image_url",
+      (p) => {
+        el.imagePreviewInfo.textContent = `Uploading... ${Math.round(p * 100)}%`;
+      }
+    );
+    el.imagePreviewInfo.textContent = `Ready - ${dimensions}`;
   } catch (err) {
     el.imagePreviewInfo.textContent = `Error: ${err.message}`;
     state.imageUrl = null;
@@ -233,13 +538,27 @@ el.videoInput.addEventListener("change", async () => {
   // measured before the upload so the estimate can appear as soon as it lands
   const duration = await probeFileDuration(file);
 
+  if (file.size > MAX_VIDEO_BYTES) {
+    uploadCard.textContent = `Too large (${(file.size / 1048576).toFixed(0)}MB, max 200MB)`;
+    state.videoSource = null;
+    state.videoDurationSeconds = null;
+    updateGenerateEnabled();
+    refreshEstimate();
+    return;
+  }
+
+  const sizeLabel = `${(file.size / 1048576).toFixed(1)}MB`;
   try {
-    const formData = new FormData();
-    formData.append("file", file);
-    const res = await api("/api/uploads/video", { method: "POST", body: formData });
-    if (!res.ok) throw new Error(await apiError(res, "Upload failed"));
-    const data = await res.json();
-    state.videoSource = { type: "upload", videoUrl: data.video_url };
+    const videoUrl = await uploadWithFallback(
+      file,
+      file.name || "reference.mp4",
+      "/api/uploads/video",
+      "video_url",
+      (p) => {
+        uploadCard.textContent = `Uploading ${sizeLabel}... ${Math.round(p * 100)}%`;
+      }
+    );
+    state.videoSource = { type: "upload", videoUrl };
     state.videoDurationSeconds = duration;
     uploadCard.textContent = `✓ ${file.name}`;
     refreshEstimate();
