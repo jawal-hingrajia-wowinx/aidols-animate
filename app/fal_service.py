@@ -30,9 +30,11 @@ def _kling_arguments(
     return arguments
 
 
-# fal caps the reference clip by mode: video-led handles complex motion for
-# longer, image-led is meant for shorter camera moves.
-MAX_SECONDS_BY_ORIENTATION = {"video": 30, "image": 10}
+# The app runs video-led only, which fal caps at 30s. (Image-led, meant for
+# short camera moves, is capped at 10s — reinstate the distinction here if it
+# is ever offered again.)
+CHARACTER_ORIENTATION = "video"
+MAX_SECONDS = 30
 
 
 class ModelSpec:
@@ -52,8 +54,9 @@ class ModelSpec:
         # reached — the API is authoritative because it honours account pricing.
         self.price_per_second = price_per_second
 
-    def max_seconds(self, character_orientation: str) -> int:
-        return MAX_SECONDS_BY_ORIENTATION.get(character_orientation, 30)
+    @property
+    def max_seconds(self) -> int:
+        return MAX_SECONDS
 
 
 MODELS: dict[str, ModelSpec] = {

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from typing import Literal, Optional
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, model_validator
@@ -16,7 +16,6 @@ class GenerateRequest(BaseModel):
     image_url: str
     video_url: Optional[str] = None
     sample_id: Optional[str] = None
-    character_orientation: Literal["image", "video"] = "video"
     prompt: Optional[str] = None
     keep_original_sound: bool = True
 
@@ -42,7 +41,7 @@ async def _submit_one(model_key: str, job_id: str, image_url: str, video_url: st
         image_url=image_url,
         video_url=video_url,
         source=f"sample:{req.sample_id}" if req.sample_id else "upload",
-        character_orientation=req.character_orientation,
+        character_orientation=fal_service.CHARACTER_ORIENTATION,
         prompt=req.prompt,
         keep_original_sound=req.keep_original_sound,
     )
@@ -56,7 +55,7 @@ async def _submit_one(model_key: str, job_id: str, image_url: str, video_url: st
             model_key,
             image_url=image_url,
             video_url=video_url,
-            character_orientation=req.character_orientation,
+            character_orientation=fal_service.CHARACTER_ORIENTATION,
             prompt=req.prompt,
             keep_original_sound=req.keep_original_sound,
         )

@@ -84,14 +84,6 @@ function updateGenerateEnabled() {
   el.generateBtn.disabled = !(state.imageUrl && state.videoSource);
 }
 
-function setOrientation(value) {
-  document.querySelector(`input[name="orientation"][value="${value}"]`).checked = true;
-}
-
-function currentOrientation() {
-  return document.querySelector('input[name="orientation"]:checked').value;
-}
-
 
 // ---- Direct-to-fal upload ----
 //
@@ -518,7 +510,6 @@ async function selectSample(sample, cardEl) {
   clearSelection();
   cardEl.classList.add("selected");
   state.videoSource = { type: "sample", sampleId: sample.id };
-  setOrientation(sample.character_orientation || "video");
   updateGenerateEnabled();
 
   const thumb = cardEl.querySelector(".sample-thumb");
@@ -573,10 +564,6 @@ el.videoInput.addEventListener("change", async () => {
 
 // ---- Cost estimate ----
 
-document.querySelectorAll('input[name="orientation"]').forEach((radio) => {
-  radio.addEventListener("change", refreshEstimate);
-});
-
 function currencySymbol(currency) {
   return currency === "USD" ? "$" : `${currency} `;
 }
@@ -610,10 +597,7 @@ async function refreshEstimate() {
     const res = await api("/api/estimate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        duration_seconds: state.videoDurationSeconds,
-        character_orientation: currentOrientation(),
-      }),
+      body: JSON.stringify({ duration_seconds: state.videoDurationSeconds }),
     });
     if (!res.ok) throw new Error(await apiError(res, "Estimate failed"));
     const data = await res.json();
@@ -628,7 +612,7 @@ async function refreshEstimate() {
     }
     if (data.clamped) {
       el.costWarning.textContent =
-        `Your clip is ${Math.round(state.videoDurationSeconds)}s but this mode caps at ` +
+        `Your clip is ${Math.round(state.videoDurationSeconds)}s but the model caps at ` +
         `${data.max_seconds}s — fal may reject or truncate it.`;
     }
   } catch (err) {
@@ -651,7 +635,6 @@ async function generate() {
   const prompt = el.promptInput.value.trim();
   const body = {
     image_url: state.imageUrl,
-    character_orientation: currentOrientation(),
     keep_original_sound: el.keepSound.checked,
   };
   if (prompt) {

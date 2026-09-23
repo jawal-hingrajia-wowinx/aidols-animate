@@ -81,9 +81,9 @@ async def get_price_per_second(fal_id: str) -> tuple[float, str]:
     return price, "fal"
 
 
-async def estimate(model_key: str, duration_seconds: float, character_orientation: str) -> dict:
+async def estimate(model_key: str, duration_seconds: float) -> dict:
     spec = fal_service.MODELS[model_key]
-    max_seconds = spec.max_seconds(character_orientation)
+    max_seconds = spec.max_seconds
 
     seconds_billed = max(0.0, float(duration_seconds))
     clamped = seconds_billed > max_seconds
