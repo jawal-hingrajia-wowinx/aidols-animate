@@ -269,6 +269,10 @@ function initCropper() {
     responsive: true,
     dragMode: "move",
     toggleDragModeOnDblclick: false,
+    // the panel scrolls on small screens; without this a wheel over the image
+    // zooms instead, which silently breaks "Use full image" (viewMode 1 confines
+    // the crop box to the visible canvas, so a zoomed view can't hold the frame)
+    zoomOnWheel: false,
     ready: () => selectFullImage(),
     crop: onCropChange,
   });
@@ -341,6 +345,12 @@ function updateCropReadout() {
 
 function selectFullImage() {
   if (!crop.cropper) return;
+  // Undo any pan/zoom first: with viewMode 1 the crop box cannot leave the
+  // visible canvas, so from a zoomed-in view the full frame is unreachable.
+  crop.clamping = true;
+  crop.cropper.reset();
+  crop.clamping = false;
+
   const img = crop.cropper.getImageData();
   const full = largestValidRect(img.naturalWidth, img.naturalHeight);
   crop.clamping = true;
