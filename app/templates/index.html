@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AIdols — Animate</title>
-  <link rel="stylesheet" href="/static/vendor/cropper.min.css" />
-  <link rel="stylesheet" href="/static/css/style.css?v={{ asset_version }}" />
+  <link rel="stylesheet" href="{{ static_url('vendor/cropper.min.css') }}" />
+  <link rel="stylesheet" href="{{ static_url('css/style.css') }}" />
 </head>
 <body>
   <div class="page" data-model-label="{{ model_label }}">
@@ -143,7 +143,7 @@
     </div>
   </template>
 
-  <script src="/static/vendor/cropper.min.js"></script>
-  <script src="/static/js/app.js?v={{ asset_version }}"></script>
+  <script src="{{ static_url('vendor/cropper.min.js') }}"></script>
+  <script src="{{ static_url('js/app.js') }}"></script>
 </body>
 </html>

@@ -1,4 +1,4 @@
-import time
+import hashlib
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -13,9 +13,36 @@ from . import auth, config, db, fal_service
 from .routes import estimate, generate, history, samples, uploads
 
 BASE_DIR = Path(__file__).resolve().parent
+STATIC_DIR = BASE_DIR / "static"
 
-# bumped on every process start so browsers don't serve stale cached JS/CSS during dev
-ASSET_VERSION = str(int(time.time()))
+# path -> (mtime_ns, size, digest). Keyed on a stat so editing a file locally
+# picks up immediately without a restart, while a served request only pays for
+# the stat, not a re-hash.
+_asset_hashes: dict[str, tuple[int, int, str]] = {}
+
+
+def static_url(path: str) -> str:
+    """/static/<path> tagged with a hash of its contents.
+
+    A timestamp bumped at process start looked equivalent but wasn't: each
+    serverless instance minted its own, so identical files were served under
+    several URLs — fragmenting the CDN cache and making a stale asset hard to
+    tell from a fresh one. A content hash changes when, and only when, the file
+    does.
+    """
+    file = STATIC_DIR / path
+    try:
+        stat = file.stat()
+    except OSError:
+        return f"/static/{path}"
+
+    cached = _asset_hashes.get(path)
+    if cached and cached[0] == stat.st_mtime_ns and cached[1] == stat.st_size:
+        return f"/static/{path}?v={cached[2]}"
+
+    digest = hashlib.sha256(file.read_bytes()).hexdigest()[:12]
+    _asset_hashes[path] = (stat.st_mtime_ns, stat.st_size, digest)
+    return f"/static/{path}?v={digest}"
 
 
 @asynccontextmanager
@@ -38,6 +65,7 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
+templates.env.globals["static_url"] = static_url
 
 _protected = [Depends(auth.require_auth)]
 app.include_router(uploads.router, dependencies=_protected)
@@ -52,7 +80,6 @@ def _login_page(request: Request, error: str | None = None, status_code: int = 2
         request,
         "login.html",
         {
-            "asset_version": ASSET_VERSION,
             "error": error,
             "credentials_configured": auth.credentials_configured(),
         },
@@ -96,7 +123,6 @@ def index(request: Request):
         request,
         "index.html",
         {
-            "asset_version": ASSET_VERSION,
             "username": config.AUTH_USERNAME,
             "model_label": fal_service.MODELS[fal_service.DEFAULT_MODEL_KEY].label,
         },
